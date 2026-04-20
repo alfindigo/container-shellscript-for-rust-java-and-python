@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Docker Launcher</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet"/>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0e0e0f;
+      --bg-card: #161618;
+      --bg-card-hl: #1c1c1f;
+      --bg-modal: #1a1a1d;
+      --border: #2a2a2e;
+      --border-hi: #3a3a40;
+      --text: #e8e8ea;
+      --text-muted: #6b6b72;
+      --text-dim: #44444a;
+      --accent: #3ddc84;
+      --running: #3ddc84;
+      --stopping: #f5a623;
+      --error: #f74c00;
+      --idle: #44444a;
+    }
+
+    html, body { height: 100%; background: var(--bg); color: var(--text); font-family: 'IBM Plex Sans', sans-serif; }
+
+    body::before {
+      content: ''; position: fixed; inset: 0; z-index: 0; pointer-events: none;
+      background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.07) 2px, rgba(0,0,0,0.07) 4px);
+    }
+
+    .shell { position: relative; z-index: 1; min-height: 100vh; display: flex; flex-direction: column; }
+
+    header {
+      border-bottom: 1px solid var(--border); padding: 0 2rem; height: 52px;
+      display: flex; align-items: center; gap: 16px;
+    }
+    .logo { font-family: 'IBM Plex Mono', monospace; font-size: 13px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; }
+    .logo span { color: var(--accent); }
+    .header-rule { flex: 1; height: 1px; background: var(--border); }
+    .header-meta { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--text-muted); }
+
+    main { flex: 1; padding: 2.5rem 2rem; display: flex; flex-direction: column; gap: 2rem; }
+
+    .section-label {
+      font-family: 'IBM Plex Mono', monospace; font-size: 10px; font-weight: 600;
+      letter-spacing: 0.18em; text-transform: uppercase; color: var(--text-muted);
+      margin-bottom: 1rem; display: flex; align-items: center; gap: 12px;
+    }
+    .section-label::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+
+    .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: 4px; overflow: hidden; }
+
+    .card {
+      background: var(--bg-card); padding: 1.5rem;
+      display: flex; flex-direction: column; gap: 1.25rem;
+      position: relative; transition: background 0.2s;
+    }
+    .card:hover { background: var(--bg-card-hl); }
+    .card::before {
+      content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
+      background: var(--card-accent, var(--accent)); opacity: 0.5; transition: opacity 0.3s;
+    }
+    .card.state-running::before { opacity: 1; }
+
+    .card-head { display: flex; align-items: flex-start; gap: 14px; }
+    .card-icon {
+      width: 42px; height: 42px; border-radius: 3px; display: flex; align-items: center;
+      justify-content: center; font-family: 'IBM Plex Mono', monospace; font-size: 11px;
+      font-weight: 600; flex-shrink: 0; border: 1px solid var(--border-hi);
+      color: var(--card-accent, var(--accent));
+      background: color-mix(in srgb, var(--card-accent, var(--accent)) 10%, transparent);
+      border-color: color-mix(in srgb, var(--card-accent, var(--accent)) 30%, transparent);
+    }
+    .card-title { flex: 1; min-width: 0; }
+    .card-title h2 { font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .card-title .subtitle { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--text-muted); margin-top: 3px; }
+
+    .card-remove {
+      background: none; border: none; cursor: pointer; color: var(--text-dim);
+      padding: 2px; line-height: 1; font-size: 16px; transition: color 0.15s;
+    }
+    .card-remove:hover { color: var(--error); }
+
+    .status-row { display: flex; align-items: center; gap: 8px; min-height: 20px; }
+    .dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; background: var(--idle); transition: background 0.3s; }
+    .state-preparing .dot, .state-stopping .dot { background: var(--stopping); animation: blink 0.8s infinite; }
+    .state-running .dot { background: var(--running); }
+    .state-error .dot { background: var(--error); }
+    @keyframes blink { 0%, 100% { opacity: 1 } 50% { opacity: 0.2 } }
+
+    .status-text { font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: color 0.2s; }
+    .state-running .status-text { color: var(--running); }
+    .state-stopping .status-text, .state-preparing .status-text { color: var(--stopping); }
+    .state-error .status-text { color: var(--error); }
+
+    .log-box { background: #0a0a0b; border: 1px solid var(--border); border-radius: 2px; padding: 0.6rem 0.75rem; height: 110px; overflow-y: auto; font-family: 'IBM Plex Mono', monospace; font-size: 11px; line-height: 1.6; }
+    .log-box .log-line.err { color: #c0614a; }
+    .log-box .log-line.out { color: #5a7a5a; }
+    .log-box .placeholder { color: var(--text-dim); font-style: italic; }
+
+    .btn-row { display: flex; gap: 8px; }
+    .btn {
+      flex: 1; height: 34px; border-radius: 2px; border: 1px solid var(--border-hi);
+      background: transparent; font-family: 'IBM Plex Mono', monospace; font-size: 12px;
+      font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase;
+      cursor: pointer; transition: background 0.15s, border-color 0.15s, color 0.15s, opacity 0.15s;
+      color: var(--text-muted);
+    }
+    .btn:hover:not(:disabled) { color: var(--text); border-color: var(--text-muted); }
+    .btn:active:not(:disabled) { transform: scale(0.98); }
+    .btn:disabled { opacity: 0.25; cursor: not-allowed; }
+
+    .btn-start { color: var(--card-accent, var(--accent)); border-color: color-mix(in srgb, var(--card-accent, var(--accent)) 30%, transparent); }
+    .btn-start:hover:not(:disabled) { background: color-mix(in srgb, var(--card-accent, var(--accent)) 10%, transparent); border-color: var(--card-accent, var(--accent)); color: var(--card-accent, var(--accent)); }
+
+    .btn-open { flex: 0 0 34px; padding: 0; display: flex; align-items: center; justify-content: center; }
+    .btn-open svg { width: 14px; height: 14px; stroke: currentColor; fill: none; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+
+    /* add project card */
+    .card-add {
+      background: var(--bg-card); padding: 1.5rem;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 0.75rem; cursor: pointer; border: none; text-align: center;
+      transition: background 0.2s; min-height: 280px;
+    }
+    .card-add:hover { background: var(--bg-card-hl); }
+    .card-add-icon { font-size: 28px; color: var(--text-dim); }
+    .card-add-label { font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: var(--text-dim); letter-spacing: 0.1em; text-transform: uppercase; }
+
+    /* modal */
+    .modal-overlay {
+      display: none; position: fixed; inset: 0; z-index: 100;
+      background: rgba(0,0,0,0.7); align-items: center; justify-content: center;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal {
+      background: var(--bg-modal); border: 1px solid var(--border-hi); border-radius: 6px;
+      padding: 2rem; width: 480px; max-width: 95vw; display: flex; flex-direction: column; gap: 1.25rem;
+    }
+    .modal h2 { font-size: 15px; font-weight: 500; }
+    .modal-desc { font-size: 13px; color: var(--text-muted); line-height: 1.5; }
+
+    .field { display: flex; flex-direction: column; gap: 6px; }
+    .field label { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--text-muted); letter-spacing: 0.1em; text-transform: uppercase; }
+    .field-row { display: flex; gap: 8px; }
+    .field input {
+      flex: 1; height: 36px; background: #0a0a0b; border: 1px solid var(--border-hi);
+      border-radius: 2px; padding: 0 12px; font-family: 'IBM Plex Mono', monospace;
+      font-size: 12px; color: var(--text); outline: none; transition: border-color 0.15s;
+    }
+    .field input:focus { border-color: var(--accent); }
+    .field input.error { border-color: var(--error); }
+
+    .pick-btn {
+      height: 36px; padding: 0 14px; background: transparent; border: 1px solid var(--border-hi);
+      border-radius: 2px; font-family: 'IBM Plex Mono', monospace; font-size: 11px;
+      color: var(--text-muted); cursor: pointer; white-space: nowrap; transition: all 0.15s;
+      text-transform: uppercase; letter-spacing: 0.08em;
+    }
+    .pick-btn:hover { color: var(--text); border-color: var(--text-muted); }
+
+    .field-hint { font-size: 11px; color: var(--text-dim); }
+    .field-hint.valid { color: var(--running); }
+    .field-hint.invalid { color: var(--error); }
+
+    .ports-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+    .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 0.5rem; }
+    .modal-cancel { height: 34px; padding: 0 16px; background: transparent; border: 1px solid var(--border-hi); border-radius: 2px; font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: var(--text-muted); cursor: pointer; transition: all 0.15s; }
+    .modal-cancel:hover { color: var(--text); }
+    .modal-confirm { height: 34px; padding: 0 16px; background: color-mix(in srgb, var(--accent) 15%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); border-radius: 2px; font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: var(--accent); cursor: pointer; transition: all 0.15s; }
+    .modal-confirm:hover { background: color-mix(in srgb, var(--accent) 25%, transparent); }
+    .modal-confirm:disabled { opacity: 0.3; cursor: not-allowed; }
+
+    footer { border-top: 1px solid var(--border); padding: 0 2rem; height: 38px; display: flex; align-items: center; gap: 24px; }
+    .footer-item { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--text-dim); display: flex; align-items: center; gap: 6px; }
+    .footer-item .pip { width: 6px; height: 6px; border-radius: 50%; background: var(--text-dim); }
+    .footer-item.live .pip { background: var(--running); }
+  </style>
+</head>
+<body>
+<div class="shell">
+  <header>
+    <div class="logo">Docker<span>//</span>Launcher</div>
+    <div class="header-rule"></div>
+    <div class="header-meta" id="clock">--:--:--</div>
+  </header>
+
+  <main>
+    <div>
+      <div class="section-label">Projects</div>
+      <div class="cards" id="cards-root"></div>
+    </div>
+  </main>
+
+  <footer>
+    <div class="footer-item live" id="footer-sse"><div class="pip"></div>SSE connected</div>
+    <div class="footer-item" id="footer-running">0 running</div>
+  </footer>
+</div>
+
+<!-- Add Project Modal -->
+<div class="modal-overlay" id="modal">
+  <div class="modal">
+    <h2>Add Project</h2>
+    <p class="modal-desc">Select a folder containing a Dockerfile. The launcher will build and run it as a container.</p>
+
+    <div class="field">
+      <label>Project Folder</label>
+      <div class="field-row">
+        <input type="text" id="input-dir" placeholder="/path/to/your/project"/>
+        <button class="pick-btn" id="btn-pick">Browse</button>
+      </div>
+      <span class="field-hint" id="hint-dir">Folder must contain a Dockerfile</span>
+    </div>
+
+    <div class="field">
+      <label>Project Name</label>
+      <input type="text" id="input-name" placeholder="my-app"/>
+      <span class="field-hint">Used as the container name — lowercase, no spaces</span>
+    </div>
+
+    <div class="ports-row">
+      <div class="field">
+        <label>Host Port</label>
+        <input type="number" id="input-host-port" placeholder="8080"/>
+      </div>
+      <div class="field">
+        <label>Container Port</label>
+        <input type="number" id="input-container-port" placeholder="3000"/>
+      </div>
+    </div>
+
+    <div class="modal-actions">
+      <button class="modal-cancel" id="btn-cancel">Cancel</button>
+      <button class="modal-confirm" id="btn-confirm" disabled>Add Project</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  const BACKEND = "http://localhost:3333";
+
+  // ── clock ──────────────────────────────────────────────────────────────────
+  const clockEl = document.getElementById("clock");
+  setInterval(() => { clockEl.textContent = new Date().toLocaleTimeString("en-GB", { hour12: false }); }, 1000);
+
+  // ── project storage ────────────────────────────────────────────────────────
+  // Each project: { id, name, dir, hostPort, containerPort, color }
+  function loadProjects() {
+    try { return JSON.parse(localStorage.getItem("dl_projects") || "[]"); } catch { return []; }
+  }
+  function saveProjects(projects) {
+    localStorage.setItem("dl_projects", JSON.stringify(projects));
+  }
+
+  const COLORS = ["#3ddc84","#5b9ef4","#f74c00","#f5a623","#c678dd","#56b6c2","#e06c75","#98c379"];
+  function pickColor(index) { return COLORS[index % COLORS.length]; }
+
+  // ── per-project runtime state ──────────────────────────────────────────────
+  const state = {};      // id → phase string
+  const sseMap = {};     // id → EventSource
+
+  // ── SSE ────────────────────────────────────────────────────────────────────
+  function connectSSE(project) {
+    if (sseMap[project.id]) { sseMap[project.id].close(); }
+
+    const es = new EventSource(`${BACKEND}/status/${project.id}`);
+    sseMap[project.id] = es;
+
+    es.onmessage = e => {
+      const msg = JSON.parse(e.data);
+      if (msg.type === "state") {
+        setStatus(project.id, msg.running ? "running" : "idle",
+          msg.running ? `Running on http://localhost:${project.hostPort}` : "Idle");
+      }
+      if (msg.type === "status") setStatus(project.id, msg.phase, msg.message);
+      if (msg.type === "log") appendLog(project.id, msg.text, msg.stream === "stderr" ? "err" : "out");
+    };
+
+    es.onerror = () => {
+      document.getElementById("footer-sse")?.classList.remove("live");
+      setTimeout(() => connectSSE(project), 3000);
+    };
+
+    es.onopen = () => {
+      document.getElementById("footer-sse")?.classList.add("live");
+    };
+  }
+
+  // ── UI helpers ─────────────────────────────────────────────────────────────
+  function setStatus(id, phase, msg) {
+    state[id] = phase;
+    const card = document.getElementById(`card-${id}`);
+    if (!card) return;
+
+    card.className = `card state-${phase}`;
+    card.querySelector(".status-text").textContent = msg;
+
+    const isRunning = phase === "running";
+    const isBusy = phase === "preparing" || phase === "stopping";
+
+    card.querySelector(".btn-start").disabled = isRunning || isBusy;
+    card.querySelector(".btn-stop").disabled = !(isRunning || isBusy);
+    card.querySelector(".btn-open").disabled = !isRunning;
+
+    updateFooter();
+  }
+
+  function appendLog(id, text, cls) {
+    const box = document.getElementById(`log-${id}`);
+    if (!box) return;
+    box.querySelector(".placeholder")?.remove();
+    text.split("\n").forEach(line => {
+      if (!line.trim()) return;
+      const p = document.createElement("p");
+      p.className = `log-line ${cls}`;
+      p.textContent = line;
+      box.appendChild(p);
+    });
+    const lines = box.querySelectorAll(".log-line");
+    if (lines.length > 80) for (let i = 0; i < lines.length - 80; i++) lines[i].remove();
+    box.scrollTop = box.scrollHeight;
+  }
+
+  function updateFooter() {
+    const n = Object.values(state).filter(s => s === "running").length;
+    document.getElementById("footer-running").textContent = `${n} running`;
+  }
+
+  // ── render card ────────────────────────────────────────────────────────────
+  function renderCard(project) {
+    const card = document.createElement("div");
+    card.className = "card state-idle";
+    card.id = `card-${project.id}`;
+    card.style.setProperty("--card-accent", project.color);
+
+    const initials = project.name.slice(0, 3).toUpperCase();
+
+    card.innerHTML = `
+      <div class="card-head">
+        <div class="card-icon">${initials}</div>
+        <div class="card-title">
+          <h2>${project.name}</h2>
+          <div class="subtitle">port ${project.hostPort} → ${project.containerPort}</div>
+        </div>
+        <button class="card-remove" title="Remove project">×</button>
+      </div>
+      <div class="status-row">
+        <div class="dot"></div>
+        <div class="status-text">Idle</div>
+      </div>
+      <div class="log-box" id="log-${project.id}">
+        <p class="placeholder">&gt; no output yet</p>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-start">Start</button>
+        <button class="btn btn-stop" disabled>Stop</button>
+        <button class="btn btn-open" disabled title="Open in browser">
+          <svg viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+        </button>
+      </div>
+    `;
+
+    // wire buttons
+    card.querySelector(".btn-start").addEventListener("click", async () => {
+      setStatus(project.id, "preparing", "Preparing to start...");
+      appendLog(project.id, `[launcher] starting ${project.name}...`, "out");
+      try {
+        const r = await fetch(`${BACKEND}/start`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            projectDir: project.dir,
+            containerName: project.id,
+            hostPort: project.hostPort,
+            containerPort: project.containerPort,
+          })
+        });
+        if (!r.ok) throw new Error((await r.json()).error);
+      } catch (err) {
+        setStatus(project.id, "error", `Error: ${err.message}`);
+      }
+    });
+
+    card.querySelector(".btn-stop").addEventListener("click", async () => {
+      setStatus(project.id, "stopping", "Stopping container...");
+      appendLog(project.id, `[launcher] stopping ${project.name}...`, "out");
+      try {
+        const r = await fetch(`${BACKEND}/stop`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ containerName: project.id, hostPort: project.hostPort })
+        });
+        if (!r.ok) throw new Error((await r.json()).error);
+      } catch (err) {
+        setStatus(project.id, "error", `Error: ${err.message}`);
+      }
+    });
+
+    card.querySelector(".btn-open").addEventListener("click", () => {
+      window.open(`http://localhost:${project.hostPort}`, "_blank");
+    });
+
+    card.querySelector(".card-remove").addEventListener("click", () => {
+      if (state[project.id] === "running") {
+        alert("Stop the container before removing this project.");
+        return;
+      }
+      const projects = loadProjects().filter(p => p.id !== project.id);
+      saveProjects(projects);
+      sseMap[project.id]?.close();
+      delete state[project.id];
+      delete sseMap[project.id];
+      renderAll();
+    });
+
+    state[project.id] = "idle";
+    return card;
+  }
+
+  function renderAll() {
+    const root = document.getElementById("cards-root");
+    root.innerHTML = "";
+    const projects = loadProjects();
+
+    projects.forEach((p, i) => {
+      if (!p.color) p.color = pickColor(i);
+      const card = renderCard(p);
+      root.appendChild(card);
+      connectSSE(p);
+    });
+
+    // add button
+    const addCard = document.createElement("button");
+    addCard.className = "card-add";
+    addCard.innerHTML = `<div class="card-add-icon">+</div><div class="card-add-label">Add Project</div>`;
+    addCard.addEventListener("click", openModal);
+    root.appendChild(addCard);
+
+    updateFooter();
+  }
+
+  // ── modal ──────────────────────────────────────────────────────────────────
+  const modal = document.getElementById("modal");
+  const inputDir = document.getElementById("input-dir");
+  const inputName = document.getElementById("input-name");
+  const inputHostPort = document.getElementById("input-host-port");
+  const inputContainerPort = document.getElementById("input-container-port");
+  const hintDir = document.getElementById("hint-dir");
+  const btnConfirm = document.getElementById("btn-confirm");
+
+  function openModal() {
+    inputDir.value = "";
+    inputName.value = "";
+    inputHostPort.value = "";
+    inputContainerPort.value = "";
+    hintDir.textContent = "Folder must contain a Dockerfile";
+    hintDir.className = "field-hint";
+    btnConfirm.disabled = true;
+    modal.classList.add("open");
+  }
+
+  document.getElementById("btn-cancel").addEventListener("click", () => modal.classList.remove("open"));
+  modal.addEventListener("click", e => { if (e.target === modal) modal.classList.remove("open"); });
+
+  document.getElementById("btn-pick").addEventListener("click", async () => {
+    try {
+      const r = await fetch(`${BACKEND}/pick-folder`);
+      const data = await r.json();
+      if (!data.cancelled && data.path) {
+        inputDir.value = data.path;
+        validateDir(data.path);
+      }
+    } catch {}
+  });
+
+  async function validateDir(dirPath) {
+    if (!dirPath) return;
+    try {
+      const r = await fetch(`${BACKEND}/validate-folder?path=${encodeURIComponent(dirPath)}`);
+      const data = await r.json();
+      if (data.valid) {
+        hintDir.textContent = "✓ Dockerfile found";
+        hintDir.className = "field-hint valid";
+      } else {
+        hintDir.textContent = "✗ No Dockerfile found in this folder";
+        hintDir.className = "field-hint invalid";
+      }
+    } catch {
+      hintDir.textContent = "Could not validate folder";
+      hintDir.className = "field-hint invalid";
+    }
+    checkConfirm();
+  }
+
+  inputDir.addEventListener("blur", () => validateDir(inputDir.value));
+
+  function checkConfirm() {
+    const valid =
+      inputDir.value.trim() &&
+      inputName.value.trim() &&
+      inputHostPort.value &&
+      inputContainerPort.value &&
+      hintDir.classList.contains("valid");
+    btnConfirm.disabled = !valid;
+  }
+
+  [inputName, inputHostPort, inputContainerPort].forEach(el => el.addEventListener("input", checkConfirm));
+
+  document.getElementById("btn-confirm").addEventListener("click", () => {
+    const projects = loadProjects();
+    const index = projects.length;
+    const name = inputName.value.trim().toLowerCase().replace(/\s+/g, "-");
+
+    projects.push({
+      id: name,
+      name: inputName.value.trim(),
+      dir: inputDir.value.trim(),
+      hostPort: parseInt(inputHostPort.value),
+      containerPort: parseInt(inputContainerPort.value),
+      color: pickColor(index),
+    });
+
+    saveProjects(projects);
+    modal.classList.remove("open");
+    renderAll();
+  });
+
+  // ── init ───────────────────────────────────────────────────────────────────
+  renderAll();
+</script>
+</body>
+</html>
