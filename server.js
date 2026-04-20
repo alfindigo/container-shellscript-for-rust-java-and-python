@@ -5,7 +5,8 @@ const fs = require("fs");
 
 const app = express();
 app.use(express.json());
-app.use(express.static(path.join(__dirname, "public")));
+// Serve the dashboard UI from the `dashboard/public` folder
+app.use(express.static(path.join(__dirname, "dashboard", "public")));
 
 // ── startup check ─────────────────────────────────────────────────────────
 try {
@@ -207,7 +208,8 @@ app.post("/stop", (req, res) => {
 });
 
 // ── boot ──────────────────────────────────────────────────────────────────
-const PORT = 3333;
-app.listen(PORT, () =>
-  console.log(`Launcher -> http://localhost:${PORT}`)
-);
+const envPort = process.env.PORT ? parseInt(process.env.PORT, 10) : 0;
+const server = app.listen(envPort, () => {
+  const actualPort = server.address().port;
+  console.log(`Launcher -> http://localhost:${actualPort}`);
+});
